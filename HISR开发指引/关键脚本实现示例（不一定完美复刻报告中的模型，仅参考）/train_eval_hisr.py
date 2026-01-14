@@ -39,10 +39,10 @@ import numpy as np
 import torch
 from tqdm.auto import tqdm
 
-from load_data import readTraces
-from Sketching.hash_function import GenHashSeed
-from UCL_sketch.ucl_sketch import UCLSketch
-from Utils.mertrics import (
+from ucl_refs.load_data import readTraces
+from ucl_refs.hash_function import GenHashSeed
+from ucl_refs.ucl_sketch import UCLSketch
+from ucl_refs.mertrics import (
     average_absolute_error,
     average_relative_error,
     weighted_mean_relative_difference,
@@ -204,7 +204,7 @@ class HISRPipeline:
         # Sampling setup: follow UCL main.py
         size = len(traces)
         sample_initial = size - (cfg.interval + 12) * cfg.num_samples
-        samples_ref = np.empty((0, cfg.depth, cfg.width), dtype=np.int64)
+        samples_ref = np.empty((0, ref.cm.depth, ref.cm.width), dtype=np.int64)
 
         for idx, trace in enumerate(tqdm(traces, desc="[HISR] Inserting traces (ref view)", leave=False)):
             ground_truth[trace] = ground_truth.get(trace, 0) + 1
@@ -222,7 +222,7 @@ class HISRPipeline:
         for s in range(1, cfg.num_envs):
             sk = UCLSketch(cfg.slot_num, cfg.width, cfg.depth, cfg.bf_width, cfg.bf_hash, cfg.key_size, decode_mode="CM")
             patch_cm_seeds(sk, seed_offset=s)
-            samples = np.empty((0, cfg.depth, cfg.width), dtype=np.int64)
+            samples = np.empty((0, sk.cm.depth, sk.cm.width), dtype=np.int64)
 
             # Insert same traces, sample snapshots
             for idx, trace in enumerate(tqdm(traces, desc=f"[HISR] Inserting traces (view s={s})", leave=False)):
