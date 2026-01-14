@@ -1,0 +1,114 @@
+
+你可以直接下载这些脚本（均可编辑）：
+
+* [hisr/data/prefix.py](sandbox:/mnt/data/uclpe-sketch-master/hisr/data/prefix.py)
+* [hisr/data/bucketize.py](sandbox:/mnt/data/uclpe-sketch-master/hisr/data/bucketize.py)
+* [hisr/data/local_operator.py](sandbox:/mnt/data/uclpe-sketch-master/hisr/data/local_operator.py)
+* [hisr/model/encoder_bipartite.py](sandbox:/mnt/data/uclpe-sketch-master/hisr/model/encoder_bipartite.py)
+* [hisr/model/decoder_prefix_tree.py](sandbox:/mnt/data/uclpe-sketch-master/hisr/model/decoder_prefix_tree.py)
+* [scripts/train_eval_hisr.py](sandbox:/mnt/data/uclpe-sketch-master/scripts/train_eval_hisr.py)
+
+---
+
+## 这版实现与你的建模描述如何对齐（按 I/O 与职责）
+
+### 1) `hisr/data/prefix.py`
+
+* **输入**：UCL 的 key（`bytes`，默认 8B）
+* **输出**：按层级（/16、/24、/32）生成 **prefix id**；并提供：
+
+  * 候选集合的 prefix 聚合统计（构建 “Coarse/Medium/Fine” 视角的真值/分析量）
+  * 热点 prefix 选择（Top-K）
+  * 按 prefix 过滤 keys（用于你说的“先找大鱼，再下网捕捞”的逐级缩小）
+
+> 默认实现是 **u64 比特前缀**（适配 UCL 常见的“opaque key bytes”）；若你的 key 真的是 IPv4，可在这里切换解析模式。
+
+---
+
+### 2) `hisr/data/bucketize.py`
+
+* **输入**：候选 key 列表
+* **输出**：逻辑桶 `BucketIndex`
+
+  * `bucket_keys(b)`：桶内 key 列表
+  * `key_to_bucket(key)`：key→(b,offset)
+* **实现要点**：支持 `sorted/hash/prefix` 三种策略；其中 `prefix` 会把同一前缀的 key 尽量聚在一起（服务 HISR 的 prefix-scale 叙事与稳定性）。
+
+---
+
+### 3) `hisr/data/local_operator.py`
+
+* **输入**：某环境 e 下的 CM sketch（`cm.depth, cm.width, cm.matrix`）+ 桶内 keys
+* **输出**：`BucketGraph`
+
+  * `y_{e,b}`：桶相关的局部 counter 向量
+  * `edge list`：A_{e,b} 的稀疏二部图边表（key 节点 ↔ counter 节点）
+* **实现要点**：
+
+  * counter 节点做 **局部压缩编号**（只保留桶内 keys 触达的 counters）
+  * 提供 `predict_counters_from_x()`：用边表把 \hat{x} 投影回 \hat{y}（用于 self-supervised measurement loss）
+
+---
+
+### 4) `hisr/model/encoder_bipartite.py`
+
+* **输入**：`BucketGraph(y_{e,b}, edge_list)`
+* **输出**：`EncoderOutput(z_c, z_v, h_key_c, h_key_v, h_ctr)`
+* **实现要点（贴合 V5 文字描述）**：
+
+  * **T 层交替消息传递**：Counter→Key、Key→Counter
+  * 每层包含：聚合（sum/mean）+ MLP +（可选）GRUCell 更新
+  * 显式输出 **不变/特异**两路表征：`z_c`（invariant），`z_v`（variant）
+
+---
+
+### 5) `hisr/model/decoder_prefix_tree.py`
+
+* **输入**：`z_c` + `PrefixTreeSpec`（由桶内 key 构建的前缀树/层级分组）
+* **输出**：
+
+  * 叶子层 \hat{x}_{e,b}（桶内每个 key 的频率估计）
+  * 各层 `mass_by_level`（便于做层级可视化/一致性分析）
+* **实现要点（对齐你的“质量守恒 + 分裂比例”叙事）**：
+
+  * 根质量 `c(root)=softplus(head(z_c))`
+  * 每个内部节点：对子节点打分→softmax→得到分裂比例→质量下传
+  * 叶子质量汇成 \hat{x}，默认非负且严格守恒
+
+> 你提到的 Path-A/Path-B：这份实现里 decoder 支持输出多层 mass；Pipeline 里可以用“先 coarse 聚合选热点，再重建 hot 子集”的方式实现 Path-A；一次性全解码+统计多层 mass 则对应 Path-B。
+
+---
+
+### 6) `scripts/train_eval_hisr.py`
+
+* **功能**：统一入口（构建多环境 batch：seed/phase；训练：self-supervised + IRM；评测并输出指标）
+* **关键点（和你要的“IRM-style 多环境逆问题学习”一致）**：
+
+  * 环境 `e=(τ,s,π)`：
+
+    * `τ`：snapshot index（UCL 的滑窗采样点）
+    * `s`：不同 CM hash seeds（通过 patch CM seeds 形成多环境）
+    * `π`：key-space phase（L1 全局→L2 热 /16→L3 热 /24）
+  * 目标函数实现了骨架：
+
+    * measurement loss：||A x − y||²（用 edge list 计算）
+    * sparsity surrogate
+    * IRM penalty：对标量 `w` 的梯度惩罚（标准 IRM trick）
+    * invariant alignment：同一桶跨环境 z_c 方差约束（可继续替换成更强 InfoNCE）
+
+---
+
+## 如何运行（最少信息）
+
+在 `uclpe-sketch-master/` 根目录下：
+
+```bash
+python scripts/train_eval_hisr.py \
+  --data network \
+  --data_path /path/to/your/ucl_dataset_file \
+  --break_number 1000000
+```
+
+（其余参数都有默认值；你后面要做更严格的 ablation/对齐 UCL 配置时再细调。）
+
+

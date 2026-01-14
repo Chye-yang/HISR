@@ -1,0 +1,49 @@
+# HISR (Hierarchical Invariant Sketch Resolution) 项目依赖
+# 基于对项目代码和参考仓库的完整分析
+
+# 核心依赖（运行HISR代码必需）
+torch>=2.0.0
+numpy>=1.21.0
+tqdm>=4.60.0
+
+# 神经网络模型相关依赖
+timm>=0.6.0  # 用于模型构建和预训练权重
+
+# 数据处理和变换
+ftfy>=6.0.0  # 文本清理工具
+regex>=2022.0.0  # 高级正则表达式
+
+# NLP和Tokenizer相关（ZoomSynth项目中使用的）
+transformers>=4.20.0  # HuggingFace Transformers
+tokenizers>=0.13.0
+
+# 实验管理和配置
+dataclasses  # Python 3.7+内置
+argparse  # Python标准库
+
+# 数据缓存和序列化
+huggingface-hub>=0.10.0  # 模型下载和缓存
+
+# 可选依赖（用于数据可视化）
+matplotlib>=3.5.0
+seaborn>=0.11.0
+
+# 可选依赖（用于Jupyter notebook支持）
+jupyter>=1.0.0
+ipywidgets>=7.6.0
+
+# 开发依赖（测试和代码质量）
+pytest>=6.0.0
+black>=22.0.0
+flake8>=4.0.0
+
+# 用于数据处理（如果使用pandas进行扩展分析）
+pandas>=1.3.0
+
+# 注意：以下包可能需要系统依赖
+# - nltk：自然语言工具包（可通过 nltk.download() 下载资源）
+# - opencv-python：计算机视觉库（可选）
+
+# 环境配置建议：
+# Python>=3.8，推荐使用conda环境或venv隔离环境
+# 对于GPU支持，请安装对应的CUDA版本torch包
